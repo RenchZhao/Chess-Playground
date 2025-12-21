@@ -599,9 +599,12 @@ class ChessEngine {
         this.board[fromSquare] = null;
         this.board[toSquare] = piece;
         
+        // console.log('move')
         // 处理兵的升变
         if (piece.type === 'pawn' && (toSquare[1] === '1' || toSquare[1] === '8')) {
-            if (promotionPiece) {
+            // console.log(promotionPiece)
+            if (promotionPiece) {  //bug 这里没有输出，说明promotionPiece是null
+                // console.log('piece')
                 this.board[toSquare] = { type: promotionPiece, color: piece.color };
                 moveData.isPromotion = true;
                 moveData.promotionPiece = promotionPiece;
@@ -744,6 +747,7 @@ class ChessEngine {
         
         // 三次重复局面（简化版本）
         if (this.moveHistory.length > 8) {
+            // TODO
             // 这里可以实现更复杂的重复局面检测
         }
         

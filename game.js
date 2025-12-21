@@ -93,7 +93,7 @@ class GameController {
     }
 
     // 处理格子点击
-    handleSquareClick(square) {
+    async handleSquareClick(square) {
         if (this.isAIThinking || !this.isPlayerTurn) return;
         
         const piece = this.engine.board[square];
@@ -107,7 +107,7 @@ class GameController {
             
             // 如果点击的是可移动的格子，执行移动
             if (this.highlightedSquares.includes(square)) {
-                this.makeMove(this.selectedSquare, square);
+                await this.makeMove(this.selectedSquare, square);
                 return;
             }
             
@@ -156,20 +156,22 @@ class GameController {
     }
 
     // 执行移动
-    makeMove(fromSquare, toSquare, promotionPiece = null) {
+    async makeMove(fromSquare, toSquare, promotionPiece = null) {
+        // console.log('game_move')
+        // 处理兵的升变
+        const piece = this.engine.board[fromSquare];
+        if (piece && piece.type === 'pawn' && (toSquare[1] === '1' || toSquare[1] === '8')) {
+            // promotionPiece = this.showPromotionDialog(fromSquare, toSquare);
+            promotionPiece = await this.showPromotionDialog();
+        }
+        // console.log(promotionPiece)
         const success = this.engine.makeMove(fromSquare, toSquare, promotionPiece);
         
-        if (success) {
+        if (success) {      
+
             this.clearSelection();
             this.updateBoardDisplay();
             this.updateUI();
-            
-            // 处理兵的升变
-            const piece = this.engine.board[toSquare];
-            if (piece && piece.type === 'pawn' && (toSquare[1] === '1' || toSquare[1] === '8')) {
-                this.showPromotionDialog(fromSquare, toSquare);
-                return;
-            }
             
             // 播放移动音效
             this.playMoveSound();
@@ -192,66 +194,66 @@ class GameController {
     }
 
     // 显示升变对话框
-    showPromotionDialog(fromSquare, toSquare) {
-        const modal = document.getElementById('promotionModal');
-        const options = document.getElementById('promotionOptions');
-        const color = this.engine.board[toSquare].color;
-        
-        // 清空选项
-        options.innerHTML = '';
-        
-        // 升变选项
-        const promotionPieces = ['queen', 'rook', 'bishop', 'knight'];
-        const pieceSymbols = { queen: '♕', rook: '♖', bishop: '♗', knight: '♘' };
-        const pieceNames = { queen: '后', rook: '车', bishop: '象', knight: '马' };
-        
-        for (const piece of promotionPieces) {
+    showPromotionDialog() {
+        return new Promise((resolve) => {
+          const modal = document.getElementById('promotionModal');
+          const options = document.getElementById('promotionOptions');
+          
+          options.innerHTML = '';
+          
+          const promotionPieces = ['queen', 'rook', 'bishop', 'knight'];
+          const pieceSymbols = { queen: '♕', rook: '♖', bishop: '♗', knight: '♘' };
+          const pieceNames = { queen: '后', rook: '车', bishop: '象', knight: '马' };
+          
+          for (const piece of promotionPieces) {
             const option = document.createElement('div');
             option.className = 'piece-option';
             option.innerHTML = `
-                <div class="text-4xl mb-2">${pieceSymbols[piece]}</div>
-                <div class="text-sm font-medium">${pieceNames[piece]}</div>
+              <div class="text-4xl mb-2">${pieceSymbols[piece]}</div>
+              <div class="text-sm font-medium">${pieceNames[piece]}</div>
             `;
             
             option.addEventListener('click', () => {
-                this.completePromotion(fromSquare, toSquare, piece);
-                this.closePromotionDialog();
+              this.closePromotionDialog();
+              resolve(piece);  // ✅ 用户选择后，Promise 完成
             });
             
             options.appendChild(option);
-        }
-        
-        modal.classList.remove('hidden');
-        
-        // 动画效果
-        anime({
+          }
+          
+          modal.classList.remove('hidden');
+          
+          anime({
             targets: '#promotionContent',
             scale: [0.8, 1],
             opacity: [0, 1],
             duration: 300,
             easing: 'easeOutBack'
+          });
         });
     }
 
     // 完成升变
-    completePromotion(fromSquare, toSquare, pieceType) {
-        // 重新执行移动并指定升变棋子
-        this.engine.makeMove(fromSquare, toSquare, pieceType);
-        this.updateBoardDisplay();
-        this.updateUI();
+    completePromotion(toSquare, pieceType) {
+        // 废弃代码
+
+        // 重新执行移动并指定升变棋子-这个是bug，因为fromSquare已经是null了，移动会导致toSquare被错误置为null
+        // this.engine.makeMove(fromSquare, toSquare, pieceType);
+        // this.updateBoardDisplay();
+        // this.updateUI();
         
-        // 检查游戏是否结束
-        if (this.engine.gameState !== 'playing' && this.engine.gameState !== 'check') {
-            this.endGame();
-            return;
-        }
+        // // 检查游戏是否结束
+        // if (this.engine.gameState !== 'playing' && this.engine.gameState !== 'check') {
+        //     this.endGame();
+        //     return;
+        // }
         
-        this.switchTurn();
+        // this.switchTurn();
         
-        if (this.shouldAIMove()) {
-            this.isPlayerTurn = false;
-            setTimeout(() => this.makeAIMove(), this.getAIThinkTime());
-        }
+        // if (this.shouldAIMove()) {
+        //     this.isPlayerTurn = false;
+        //     setTimeout(() => this.makeAIMove(), this.getAIThinkTime());
+        // }
     }
 
     // 关闭升变对话框
