@@ -287,7 +287,7 @@ class GameController {
         setTimeout(() => {
             const aiColor = this.engine.currentPlayer;
             const depth = this.engine.aiDepth[this.gameConfig.difficulty] || 4;
-            
+            console.log('depth',depth);
             const bestMove = this.engine.getBestMove(aiColor, depth);
             
             if (bestMove) {

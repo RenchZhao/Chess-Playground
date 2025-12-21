@@ -19,21 +19,43 @@ class ChessEngine {
         this.aiDepth = {
             easy: 2,
             medium: 4,
-            hard: 6
+            hard: 8
         };
         
         // 棋子价值
         this.pieceValues = {
+            // 'pawn': 100,
+            // 'knight': 320,
+            // 'bishop': 330,
+            // 'rook': 500,
+            // 'queen': 900,
+            // 'king': 20000
             'pawn': 100,
-            'knight': 320,
-            'bishop': 330,
-            'rook': 500,
-            'queen': 900,
-            'king': 20000
+            'knight': 280,
+            'bishop': 320,
+            'rook': 479,
+            'queen': 929,
+            'king': 60000  // 极大值
         };
+
+        // // 位置得分权重（占总价值的百分比）
+        // this.positionWeights = {
+        //     'pawn': 0.15,      // 兵：位置占15%
+        //     'knight': 0.08,    // 马：8%
+        //     'bishop': 0.08,    // 象：8%
+        //     'rook': 0.05,      // 车：5%
+        //     'queen': 0.02,     // 后：2%（后本身强大，位置影响小）
+        //     'king': 0.01       // 王：1%（主要靠专门的安全评估）
+        // };
         
-        // 位置评估表
-        this.pieceSquareTables = this.initializePieceSquareTables();
+        // // 位置评估表
+        // this.pieceSquareTables = this.initializePieceSquareTables();
+
+        // 纯位置得分（相对值）
+        this.rawPST = this.initializeRawPST();
+        
+        // 预处理：将棋子价值加到位置表上
+        this.pst = this.mergeValueWithPST();
     }
 
     // 初始化棋盘
@@ -96,149 +118,134 @@ class ChessEngine {
     }
 
     // 初始化位置评估表
-    initializePieceSquareTables() {
+    initializeRawPST() {
         return {
             pawn: {
                 white: [
-                    [0,  0,  0,  0,  0,  0,  0,  0],
-                    [50, 50, 50, 50, 50, 50, 50, 50],
-                    [10, 10, 20, 30, 30, 20, 10, 10],
-                    [5,  5, 10, 25, 25, 10,  5,  5],
-                    [0,  0,  0, 20, 20,  0,  0,  0],
-                    [5, -5, -10,  0,  0, -10, -5,  5],
-                    [5, 10, 10, -20, -20, 10, 10,  5],
-                    [0,  0,  0,  0,  0,  0,  0,  0]
+                    [  0,   0,   0,   0,   0,   0,   0,   0],
+                    [ 78,  83,  86,  73, 102,  82,  85,  90],
+                    [  7,  29,  21,  44,  40,  31,  44,   7],
+                    [-17,  16,  -2,  15,  14,   0,  15, -13],
+                    [-26,   3,  10,   9,   6,   1,   0, -23],
+                    [-22,   9,   5, -11, -10,  -2,   3, -19],
+                    [-31,   8,  -7, -37, -36, -14,   3, -31],
+                    [  0,   0,   0,   0,   0,   0,   0,   0]
                 ],
-                black: [
-                    [0,  0,  0,  0,  0,  0,  0,  0],
-                    [5, 10, 10, -20, -20, 10, 10,  5],
-                    [5, -5, -10,  0,  0, -10, -5,  5],
-                    [0,  0,  0, 20, 20,  0,  0,  0],
-                    [5,  5, 10, 25, 25, 10,  5,  5],
-                    [10, 10, 20, 30, 30, 20, 10, 10],
-                    [50, 50, 50, 50, 50, 50, 50, 50],
-                    [0,  0,  0,  0,  0,  0,  0,  0]
-                ]
+                black: null  // 将在下方自动生成
             },
             knight: {
                 white: [
-                    [-50, -40, -30, -30, -30, -30, -40, -50],
-                    [-40, -20,   0,   0,   0,   0, -20, -40],
-                    [-30,   0,  10,  15,  15,  10,   0, -30],
-                    [-30,   5,  15,  20,  20,  15,   5, -30],
-                    [-30,   0,  15,  20,  20,  15,   0, -30],
-                    [-30,   5,  10,  15,  15,  10,   5, -30],
-                    [-40, -20,   0,   5,   5,   0, -20, -40],
-                    [-50, -40, -30, -30, -30, -30, -40, -50]
+                    [-66, -53, -75, -75, -10, -55, -58, -70],
+                    [ -3,  -6, 100, -36,   4,  62,  -4, -14],
+                    [ 10,  67,   1,  74,  73,  27,  62,  -2],
+                    [ 24,  24,  45,  37,  33,  41,  25,  17],
+                    [ -1,   5,  31,  21,  22,  35,   2,   0],
+                    [-18,  10,  13,  22,  18,  15,  11, -14],
+                    [-23, -15,   2,   0,   2,   0, -23, -20],
+                    [-74, -23, -26, -24, -19, -35, -22, -69]
                 ],
-                black: [
-                    [-50, -40, -30, -30, -30, -30, -40, -50],
-                    [-40, -20,   0,   5,   5,   0, -20, -40],
-                    [-30,   5,  10,  15,  15,  10,   5, -30],
-                    [-30,   0,  15,  20,  20,  15,   0, -30],
-                    [-30,   5,  15,  20,  20,  15,   5, -30],
-                    [-30,   0,  10,  15,  15,  10,   0, -30],
-                    [-40, -20,   0,   0,   0,   0, -20, -40],
-                    [-50, -40, -30, -30, -30, -30, -40, -50]
-                ]
+                black: null
             },
             bishop: {
                 white: [
-                    [-20, -10, -10, -10, -10, -10, -10, -20],
-                    [-10,   0,   0,   0,   0,   0,   0, -10],
-                    [-10,   0,   5,  10,  10,   5,   0, -10],
-                    [-10,   5,   5,  10,  10,   5,   5, -10],
-                    [-10,   0,  10,  10,  10,  10,   0, -10],
-                    [-10,  10,  10,  10,  10,  10,  10, -10],
-                    [-10,   5,   0,   0,   0,   0,   5, -10],
-                    [-20, -10, -10, -10, -10, -10, -10, -20]
+                    [-59, -78, -82, -76, -23,-107, -37, -50],
+                    [-11,  20,  35, -42, -39,  31,   2, -22],
+                    [ -9,  39, -32,  41,  52, -10,  28, -14],
+                    [ 25,  17,  20,  34,  26,  25,  15,  10],
+                    [ 13,  10,  17,  23,  17,  16,   0,   7],
+                    [ 14,  25,  24,  15,   8,  25,  20,  15],
+                    [ 19,  20,  11,   6,   7,   6,  20,  16],
+                    [ -7,   2, -15, -12, -14, -15, -10, -10]
                 ],
-                black: [
-                    [-20, -10, -10, -10, -10, -10, -10, -20],
-                    [-10,   5,   0,   0,   0,   0,   5, -10],
-                    [-10,  10,  10,  10,  10,  10,  10, -10],
-                    [-10,   0,  10,  10,  10,  10,   0, -10],
-                    [-10,   5,   5,  10,  10,   5,   5, -10],
-                    [-10,   0,   5,  10,  10,   5,   0, -10],
-                    [-10,   0,   0,   0,   0,   0,   0, -10],
-                    [-20, -10, -10, -10, -10, -10, -10, -20]
-                ]
+                black: null
             },
             rook: {
                 white: [
-                    [0,  0,  0,  0,  0,  0,  0,  0],
-                    [5, 10, 10, 10, 10, 10, 10,  5],
-                    [-5,  0,  0,  0,  0,  0,  0, -5],
-                    [-5,  0,  0,  0,  0,  0,  0, -5],
-                    [-5,  0,  0,  0,  0,  0,  0, -5],
-                    [-5,  0,  0,  0,  0,  0,  0, -5],
-                    [-5,  0,  0,  0,  0,  0,  0, -5],
-                    [0,  0,  0,  5,  5,  0,  0,  0]
+                    [ 35,  29,  33,   4,  37,  33,  56,  50],
+                    [ 55,  29,  56,  67,  55,  62,  34,  60],
+                    [ 19,  35,  28,  33,  45,  27,  25,  15],
+                    [  0,   5,  16,  13,  18,  -4,  -9,  -6],
+                    [-28, -35, -16, -21, -13, -29, -46, -30],
+                    [-42, -28, -42, -25, -25, -35, -26, -46],
+                    [-53, -38, -31, -26, -29, -43, -44, -53],
+                    [-30, -24, -18,   5,  -2, -18, -31, -32]
                 ],
-                black: [
-                    [0,  0,  0,  5,  5,  0,  0,  0],
-                    [-5,  0,  0,  0,  0,  0,  0, -5],
-                    [-5,  0,  0,  0,  0,  0,  0, -5],
-                    [-5,  0,  0,  0,  0,  0,  0, -5],
-                    [-5,  0,  0,  0,  0,  0,  0, -5],
-                    [-5,  0,  0,  0,  0,  0,  0, -5],
-                    [5, 10, 10, 10, 10, 10, 10,  5],
-                    [0,  0,  0,  0,  0,  0,  0,  0]
-                ]
+                black: null
             },
             queen: {
                 white: [
-                    [-20, -10, -10, -5, -5, -10, -10, -20],
-                    [-10,   0,   0,  0,  0,   0,   0, -10],
-                    [-10,   0,   5,  5,  5,   5,   0, -10],
-                    [-5,    0,   5,  5,  5,   5,   0, -5],
-                    [0,     0,   5,  5,  5,   5,   0,  0],
-                    [-10,   5,   5,  5,  5,   5,   0, -10],
-                    [-10,   0,   5,  0,  0,   0,   0, -10],
-                    [-20, -10, -10, -5, -5, -10, -10, -20]
+                    [  6,   1,  -8,-104,  69,  24,  88,  26],
+                    [ 14,  32,  60, -10,  20,  76,  57,  24],
+                    [ -2,  43,  32,  60,  72,  63,  43,   2],
+                    [  1, -16,  22,  17,  25,  20, -13,  -6],
+                    [-14, -15,  -2,  -5,  -1, -10, -20, -22],
+                    [-30,  -6, -13, -11, -16, -11, -16, -27],
+                    [-36, -18,   0, -19, -15, -15, -21, -38],
+                    [-39, -30, -31, -13, -31, -36, -34, -42]
                 ],
-                black: [
-                    [-20, -10, -10, -5, -5, -10, -10, -20],
-                    [-10,   0,   5,  0,  0,   0,   0, -10],
-                    [-10,   5,   5,  5,  5,   5,   0, -10],
-                    [0,     0,   5,  5,  5,   5,   0,  0],
-                    [-5,    0,   5,  5,  5,   5,   0, -5],
-                    [-10,   0,   5,  5,  5,   5,   0, -10],
-                    [-10,   0,   0,  0,  0,   0,   0, -10],
-                    [-20, -10, -10, -5, -5, -10, -10, -20]
-                ]
+                black: null
             },
             king: {
                 white: [
-                    [-30, -40, -40, -50, -50, -40, -40, -30],
-                    [-30, -40, -40, -50, -50, -40, -40, -30],
-                    [-30, -40, -40, -50, -50, -40, -40, -30],
-                    [-30, -40, -40, -50, -50, -40, -40, -30],
-                    [-20, -30, -30, -40, -40, -30, -30, -20],
-                    [-10, -20, -20, -20, -20, -20, -20, -10],
-                    [20,  20,   0,   0,   0,   0,  20,  20],
-                    [20,  30,  10,   0,   0,  10,  30,  20]
+                    [  4,  54,  47, -99, -99,  60,  83, -62],
+                    [-32,  10,  55,  56,  56,  55,  10,   3],
+                    [-62,  12, -57,  44, -67,  28,  37, -31],
+                    [-55,  50,  11,  -4, -19,  13,   0, -49],
+                    [-55, -43, -52, -28, -51, -47,  -8, -50],
+                    [-47, -42, -43, -79, -64, -32, -29, -32],
+                    [ -4,   3, -14, -50, -57, -18,  13,   4],
+                    [ 17,  30,  -3, -14,   6,  -1,  40,  18]
                 ],
-                black: [
-                    [20,  30,  10,   0,   0,  10,  30,  20],
-                    [20,  20,   0,   0,   0,   0,  20,  20],
-                    [-10, -20, -20, -20, -20, -20, -20, -10],
-                    [-20, -30, -30, -40, -40, -30, -30, -20],
-                    [-30, -40, -40, -50, -50, -40, -40, -30],
-                    [-30, -40, -40, -50, -50, -40, -40, -30],
-                    [-30, -40, -40, -50, -50, -40, -40, -30],
-                    [-30, -40, -40, -50, -50, -40, -40, -30]
-                ]
+                black: null
             }
         };
     }
 
+    // 将棋子价值加到每个位置得分上
+    mergeValueWithPST() {
+        const pst = {};
+        const pieces = ['pawn', 'knight', 'bishop', 'rook', 'queen', 'king'];
+        
+        for (const pieceName of pieces) {
+            const baseValue = this.pieceValues[pieceName];
+            const rawTable = this.rawPST[pieceName];
+            
+            // 为白方和黑方生成表
+            pst[pieceName] = {
+                white: this.combineRowForColor(rawTable.white, baseValue),
+                black: this.combineRowForColor(rawTable.white, baseValue, true) // 黑方翻转
+            };
+        }
+        
+        return pst;
+    }
+
+    // 合并单行数据（可选翻转给黑方用）
+    combineRowForColor(table, baseValue, flip = false) {
+        const result = [];
+        
+        for (let i = 0; i < 8; i++) {
+            const row = table[i];
+            const processedRow = row.map(val => val + baseValue);
+            
+            if (flip) {
+                result.unshift(processedRow);  // 黑方：翻转行顺序
+            } else {
+                result.push(processedRow);     // 白方：正常顺序
+            }
+        }
+
+        return result.flat();
+    }
+
     // 获取棋子在指定位置的所有合法移动
-    getLegalMoves(square) {
+    getLegalMoves(square, playColor = this.currentPlayer) {
+        console.log(`getLegalMoves(${square}, color=${playColor})`);
         const piece = this.board[square];
-        if (!piece || piece.color !== this.currentPlayer) {
+        if (!piece || piece.color !== playColor) {
             return [];
         }
+        console.log(`⚠️ 在 ${square} 有${piece.color}色棋子 ${piece.type}`);
 
         let moves = [];
         
@@ -262,6 +269,7 @@ class ChessEngine {
                 moves = this.getKnightMoves(square);
                 break;
         }
+        // console.log(`⚠️ 在 ${square} 有移动 ${moves}`);
 
         // 过滤掉会导致自己王被将军的移动
         return moves.filter(move => !this.wouldLeaveInCheck(square, move));
@@ -788,11 +796,22 @@ class ChessEngine {
     }
 
     // AI决策（Minimax算法 + Alpha-Beta剪枝）
+    // TODO
+    // 查看杀招，防止逼和
     getBestMove(color, depth = 4) {
         let bestMove = null;
         let bestScore = color === 'white' ? -Infinity : Infinity;
         
+        console.log(`  `.repeat(3000-depth) + `getBestMove(${color}, depth=${depth})`);
+    
         const moves = this.getAllLegalMoves(color);
+        
+        console.log(`  `.repeat(3000-depth) + `找到 ${moves.length} 个着法`);
+        
+        if (moves.length === 0) {
+            console.error(`❌ 在深度 ${depth} 时，${color} 没有着法！`);
+            return null;  // 立即发现问题
+        }
         
         for (const move of moves) {
             // 模拟移动
@@ -827,15 +846,24 @@ class ChessEngine {
         for (const [square, piece] of Object.entries(this.board)) {
             if (!piece || piece.color !== color) continue;
             
-            const legalMoves = this.getLegalMoves(square);
+            const legalMoves = this.getLegalMoves(square, color);
+
+            // ✅ 调试：如果某个棋子没有合法移动，打印原因
+            if (legalMoves.length === 0) {
+                console.log(`⚠️ ${color} ${piece.type} 在 ${square} 没有合法移动`);
+            }
             for (const targetSquare of legalMoves) {
                 moves.push({ from: square, to: targetSquare });
             }
         }
+        // ✅ 关键调试：打印总着法数
+        console.log(`getAllLegalMoves(${color}) 返回 ${moves.length} 个着法`);
         
         return moves;
     }
 
+    // TODO
+    // 王车易位和升变没处理
     // 模拟移动（用于AI评估）
     simulateMove(fromSquare, toSquare) {
         const piece = this.board[fromSquare];
@@ -876,14 +904,17 @@ class ChessEngine {
         for (const [square, piece] of Object.entries(this.board)) {
             if (!piece) continue;
             
-            const value = this.pieceValues[piece.type];
-            const positionBonus = this.getPositionBonus(piece, square);
-            const totalValue = value + positionBonus;
+            // const baseValue = this.pieceValues[piece.type];  // 子力价值
+            // const positionBonus = this.getPositionBonus(piece, square);  // -10 ~ +10
+            // const positionBonus = this.getSquareValue(piece, square);
+            
+            // 直接查表：价值+位置得分已合并
+            const sqValue = this.getSquareValue(piece, square);
             
             if (piece.color === 'white') {
-                score += totalValue;
+                score += sqValue;
             } else {
-                score -= totalValue;
+                score -= sqValue;
             }
         }
         
@@ -894,17 +925,30 @@ class ChessEngine {
     }
 
     // 获取位置奖励
-    getPositionBonus(piece, square) {
+    // getPositionBonus(piece, square) {
+    //     const [file, rank] = [square[0], parseInt(square[1])];
+    //     const fileIndex = file.charCodeAt(0) - 'a'.charCodeAt(0);
+    //     const rankIndex = piece.color === 'white' ? 8 - rank : rank - 1;
+        
+    //     const table = this.pieceSquareTables[piece.type];
+    //     if (table && table[piece.color] && table[piece.color][rankIndex]) {
+    //         return table[piece.color][rankIndex][fileIndex] || 0;
+    //     }
+        
+    //     return 0;
+    // }
+
+    getSquareValue(piece, square) {
         const [file, rank] = [square[0], parseInt(square[1])];
         const fileIndex = file.charCodeAt(0) - 'a'.charCodeAt(0);
-        const rankIndex = piece.color === 'white' ? 8 - rank : rank - 1;
+        // const rankIndex = piece.color === 'white' ? 8 - rank : rank - 1;
+        const rankIndex = 8 - rank; //解释：RawPST视觉上是下方为0,实际上代码下标上方为0
+        // const rankIndex = rank - 1;
         
-        const table = this.pieceSquareTables[piece.type];
-        if (table && table[piece.color] && table[piece.color][rankIndex]) {
-            return table[piece.color][rankIndex][fileIndex] || 0;
-        }
+        const table = this.pst[piece.type][piece.color];
+        const index = rankIndex * 8 + fileIndex;
         
-        return 0;
+        return table[index];
     }
 
     // 评估王的安全
