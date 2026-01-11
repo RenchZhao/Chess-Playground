@@ -56,6 +56,10 @@ class ChessEngine {
         
         // 预处理：将棋子价值加到位置表上
         this.pst = this.mergeValueWithPST();
+        
+        // 置换表：缓存已评估的局面，避免重复计算
+        this.transpositionTable = new Map();
+        this.maxTableSize = 100000; // 限制表大小，防止内存溢出
     }
 
     // 初始化棋盘
@@ -240,12 +244,12 @@ class ChessEngine {
 
     // 获取棋子在指定位置的所有合法移动
     getLegalMoves(square, playColor = this.currentPlayer) {
-        console.log(`getLegalMoves(${square}, color=${playColor})`);
+        // console.log(`getLegalMoves(${square}, color=${playColor})`);
         const piece = this.board[square];
         if (!piece || piece.color !== playColor) {
             return [];
         }
-        console.log(`⚠️ 在 ${square} 有${piece.color}色棋子 ${piece.type}`);
+        // console.log(`⚠️ 在 ${square} 有${piece.color}色棋子 ${piece.type}`);
 
         let moves = [];
         
@@ -795,25 +799,80 @@ class ChessEngine {
         return false;
     }
 
-    // AI决策（Minimax算法 + Alpha-Beta剪枝）
-    // TODO
-    // 查看杀招，防止逼和
-    getBestMove(color, depth = 4) {
+    // 生成局面哈希值（改进的Zobrist哈希）
+    generateHash() {
+        let hash = 2166136261; // FNV偏移基础
+        const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+        const ranks = ['1', '2', '3', '4', '5', '6', '7', '8'];
+        
+        // 棋盘上的棋子
+        for (const rank of ranks) {
+            for (const file of files) {
+                const square = file + rank;
+                const piece = this.board[square];
+                if (piece) {
+                    // 使用FNV-1a哈希算法
+                    const pieceCode = piece.type.charCodeAt(0);
+                    const colorCode = piece.color.charCodeAt(0);
+                    const fileCode = file.charCodeAt(0);
+                    const rankCode = rank.charCodeAt(0);
+                    
+                    // 混合多个因素减少冲突
+                    let data = pieceCode * 31 + colorCode;
+                    data = data * 31 + fileCode;
+                    data = data * 31 + rankCode;
+                    
+                    hash ^= data;
+                    hash = Math.imul(hash, 16777619); // FNV质数
+                }
+            }
+        }
+        
+        // 加入当前玩家
+        hash ^= this.currentPlayer === 'white' ? 0x12345678 : 0x87654321;
+        
+        // 加入易位权利
+        hash ^= this.castlingRights.white.kingSide ? 0x11111111 : 0;
+        hash ^= this.castlingRights.white.queenSide ? 0x22222222 : 0;
+        hash ^= this.castlingRights.black.kingSide ? 0x44444444 : 0;
+        hash ^= this.castlingRights.black.queenSide ? 0x88888888 : 0;
+        
+        // 加入吃过路兵目标（如果有）
+        if (this.enPassantTarget) {
+            hash ^= this.enPassantTarget.charCodeAt(0) * 0x10000000;
+            hash ^= this.enPassantTarget.charCodeAt(1) * 0x01000000;
+        }
+        
+        return hash >>> 0; // 转换为无符号整数
+    }
+
+    // AI决策（Minimax算法 + Alpha-Beta剪枝 + 置换表）
+    getBestMove(color, depth = 4, alpha = -Infinity, beta = Infinity) {
+        // 生成当前局面哈希
+        const hash = this.generateHash();
+        const hashKey = `${hash}-${depth}-${color}`;
+        
+        // 查询置换表（只查询相同或更深深度的结果）
+        const cached = this.transpositionTable.get(hashKey);
+        if (cached && cached.depth >= depth) {
+            return cached.move;
+        }
+        
         let bestMove = null;
         let bestScore = color === 'white' ? -Infinity : Infinity;
-        
-        console.log(`  `.repeat(3000-depth) + `getBestMove(${color}, depth=${depth})`);
     
         const moves = this.getAllLegalMoves(color);
         
-        console.log(`  `.repeat(3000-depth) + `找到 ${moves.length} 个着法`);
-        
         if (moves.length === 0) {
-            console.error(`❌ 在深度 ${depth} 时，${color} 没有着法！`);
-            return null;  // 立即发现问题
+            // 存储空结果到置换表
+            this.storeInTranspositionTable(hashKey, depth, null);
+            return null;
         }
         
-        for (const move of moves) {
+        // 移动排序：优先搜索吃子移动，提升剪枝效率
+        const sortedMoves = this.sortMoves(moves, color);
+        
+        for (const move of sortedMoves) {
             // 模拟移动
             const moveResult = this.simulateMove(move.from, move.to);
             
@@ -822,21 +881,109 @@ class ChessEngine {
                 score = this.evaluatePosition();
             } else {
                 const nextColor = color === 'white' ? 'black' : 'white';
-                const nextMove = this.getBestMove(nextColor, depth - 1);
+                const nextMove = this.getBestMove(nextColor, depth - 1, alpha, beta);
                 score = nextMove ? nextMove.score : this.evaluatePosition();
             }
             
             // 恢复棋盘
             this.undoSimulatedMove(moveResult);
             
-            if ((color === 'white' && score > bestScore) || 
-                (color === 'black' && score < bestScore)) {
-                bestScore = score;
-                bestMove = { from: move.from, to: move.to, score: score };
+            if (color === 'white') {
+                // 最大化方
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestMove = { from: move.from, to: move.to, score: score };
+                }
+                alpha = Math.max(alpha, bestScore);
+                if (beta <= alpha) {
+                    break; // Beta剪枝
+                }
+            } else {
+                // 最小化方
+                if (score < bestScore) {
+                    bestScore = score;
+                    bestMove = { from: move.from, to: move.to, score: score };
+                }
+                beta = Math.min(beta, bestScore);
+                if (beta <= alpha) {
+                    break; // Alpha剪枝
+                }
+            }
+        }
+        
+        // 存储到置换表
+        this.storeInTranspositionTable(hashKey, depth, bestMove);
+        
+        return bestMove;
+    }
+    
+    // 存储到置换表（带大小限制）
+    storeInTranspositionTable(hashKey, depth, move) {
+        if (this.transpositionTable.size > this.maxTableSize) {
+            // 表满时清空一半（简单策略）
+            const keys = Array.from(this.transpositionTable.keys());
+            for (let i = 0; i < keys.length / 2; i++) {
+                this.transpositionTable.delete(keys[i]);
+            }
+        }
+        
+        this.transpositionTable.set(hashKey, {
+            depth: depth,
+            move: move
+        });
+    }
+    
+    // 迭代加深搜索（配合时间限制）
+    getBestMoveWithTimeLimit(color, maxTimeMs = 5000) {
+        const startTime = Date.now();
+        let bestMove = null;
+        
+        // 清空置换表（新搜索开始）
+        this.transpositionTable.clear();
+        
+        // 从深度1开始逐步加深搜索
+        for (let depth = 1; depth <= this.aiDepth.hard; depth++) {
+            // 检查时间
+            const elapsed = Date.now() - startTime;
+            if (elapsed > maxTimeMs * 0.8) { // 预留20%时间余量
+                break;
+            }
+            
+            // 执行搜索
+            const move = this.getBestMove(color, depth);
+            
+            if (move) {
+                bestMove = move;
+                // console.log(`深度 ${depth} 搜索完成，最佳移动：${move.from}-${move.to}，评分：${move.score}`);
+            } else {
+                break; // 没有合法移动
             }
         }
         
         return bestMove;
+    }
+    
+    // 移动排序：优先搜索吃子移动，提升剪枝效率
+    sortMoves(moves, color) {
+        const scoredMoves = moves.map(move => {
+            const targetPiece = this.board[move.to];
+            let score = 0;
+            
+            // 吃子移动优先
+            if (targetPiece) {
+                // MVV-LVA策略：最弱棋子吃最强棋子
+                const attackerValue = this.pieceValues[this.board[move.from].type] || 0;
+                const victimValue = this.pieceValues[targetPiece.type] || 0;
+                score = victimValue - attackerValue + 10000; // 确保吃子移动排在前面
+            }
+            
+            return { move, score };
+        });
+        
+        // 按分数降序排序
+        scoredMoves.sort((a, b) => b.score - a.score);
+        
+        return scoredMoves.map(item => item.move);
     }
 
     // 获取所有合法移动
@@ -848,27 +995,27 @@ class ChessEngine {
             
             const legalMoves = this.getLegalMoves(square, color);
 
-            // ✅ 调试：如果某个棋子没有合法移动，打印原因
-            if (legalMoves.length === 0) {
-                console.log(`⚠️ ${color} ${piece.type} 在 ${square} 没有合法移动`);
-            }
+            // if (legalMoves.length === 0) {
+            //     console.log(`⚠️ ${color} ${piece.type} 在 ${square} 没有合法移动`);
+            // }
+
             for (const targetSquare of legalMoves) {
                 moves.push({ from: square, to: targetSquare });
             }
         }
-        // ✅ 关键调试：打印总着法数
-        console.log(`getAllLegalMoves(${color}) 返回 ${moves.length} 个着法`);
+
+        // console.log(`getAllLegalMoves(${color}) 返回 ${moves.length} 个着法`);
         
         return moves;
     }
 
-    // TODO
-    // 王车易位和升变没处理
     // 模拟移动（用于AI评估）
     simulateMove(fromSquare, toSquare) {
         const piece = this.board[fromSquare];
         const capturedPiece = this.board[toSquare];
         const originalEnPassant = this.enPassantTarget;
+        const originalCastlingRights = JSON.parse(JSON.stringify(this.castlingRights));
+        const originalKingPositions = { ...this.kingPositions };
         
         this.board[fromSquare] = null;
         this.board[toSquare] = piece;
@@ -882,7 +1029,9 @@ class ChessEngine {
             to: toSquare,
             piece: piece,
             captured: capturedPiece,
-            originalEnPassant: originalEnPassant
+            originalEnPassant: originalEnPassant,
+            originalCastlingRights: originalCastlingRights,
+            originalKingPositions: originalKingPositions
         };
     }
 
@@ -891,10 +1040,8 @@ class ChessEngine {
         this.board[moveResult.from] = moveResult.piece;
         this.board[moveResult.to] = moveResult.captured;
         this.enPassantTarget = moveResult.originalEnPassant;
-        
-        if (moveResult.piece.type === 'king') {
-            this.kingPositions[moveResult.piece.color] = moveResult.from;
-        }
+        this.castlingRights = moveResult.originalCastlingRights;
+        this.kingPositions = moveResult.originalKingPositions;
     }
 
     // 评估当前局面

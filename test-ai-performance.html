@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI性能测试</title>
+</head>
+<body>
+    <h1>AI性能测试</h1>
+    <div id="results"></div>
+    
+    <script src="chess-engine.js"></script>
+    <script>
+        const results = document.getElementById('results');
+        
+        function log(message) {
+            const p = document.createElement('p');
+            p.textContent = message;
+            results.appendChild(p);
+            console.log(message);
+        }
+        
+        async function testAIPerformance() {
+            log('开始AI性能测试...');
+            
+            const engine = new ChessEngine();
+            const testDepths = [2, 3, 4];
+            const testColor = 'white';
+            
+            for (const depth of testDepths) {
+                log(`\n测试搜索深度: ${depth}`);
+                
+                const startTime = performance.now();
+                const bestMove = engine.getBestMove(testColor, depth);
+                const endTime = performance.now();
+                
+                const elapsed = (endTime - startTime).toFixed(2);
+                
+                if (bestMove) {
+                    log(`✓ 找到最佳移动: ${bestMove.from}-${bestMove.to} (评分: ${bestMove.score})`);
+                    log(`✓ 计算时间: ${elapsed}ms`);
+                    
+                    if (elapsed > 10000) {
+                        log(`⚠️ 警告: 计算时间超过10秒！`);
+                    } else if (elapsed > 5000) {
+                        log(`⚠️ 警告: 计算时间超过5秒！`);
+                    } else if (elapsed > 1000) {
+                        log(`⚠️ 警告: 计算时间超过1秒！`);
+                    } else {
+                        log(`✓ 性能良好！`);
+                    }
+                } else {
+                    log(`✗ 没有找到合法移动`);
+                }
+                
+                // 重置引擎状态
+                engine.loadGameState(engine.getGameState());
+            }
+            
+            log('\n测试完成！');
+        }
+        
+        // 运行测试
+        setTimeout(testAIPerformance, 100);
+    </script>
+</body>
+</html>

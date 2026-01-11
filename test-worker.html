@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Worker测试</title>
+</head>
+<body>
+    <h1>AI Worker测试</h1>
+    <div id="status">等待Worker加载...</div>
+    <div id="results"></div>
+    
+    <script>
+        const status = document.getElementById('status');
+        const results = document.getElementById('results');
+        
+        function log(message) {
+            const p = document.createElement('p');
+            p.textContent = message;
+            results.appendChild(p);
+            console.log(message);
+        }
+        
+        // 测试Worker
+        if (window.Worker) {
+            status.textContent = '浏览器支持Worker，正在加载...';
+            
+            try {
+                const worker = new Worker('ai-worker.js');
+                
+                worker.addEventListener('message', (e) => {
+                    const { type, data } = e.data;
+                    log(`收到消息: ${type}`);
+                    
+                    switch (type) {
+                        case 'loaded':
+                            status.textContent = 'Worker加载成功！';
+                            log('✓ Worker文件加载成功');
+                            
+                            // 发送初始化消息
+                            log('发送初始化消息...');
+                            worker.postMessage({
+                                type: 'init',
+                                data: {
+                                    boardState: null,
+                                    gameConfig: {}
+                                }
+                            });
+                            break;
+                            
+                        case 'ready':
+                            log('✓ AI引擎初始化成功');
+                            status.textContent = 'AI引擎就绪！';
+                            
+                            // 发送搜索请求
+                            log('发送搜索请求...');
+                            worker.postMessage({
+                                type: 'search',
+                                data: {
+                                    boardState: null,
+                                    color: 'white',
+                                    difficulty: 'easy',
+                                    maxTime: 2000
+                                }
+                            });
+                            break;
+                            
+                        case 'result':
+                            log('✓ 收到搜索结果');
+                            log(`移动: ${JSON.stringify(data.move)}`);
+                            log(`搜索时间: ${data.searchTime}ms`);
+                            status.textContent = '测试完成！';
+                            break;
+                            
+                        case 'error':
+                            log(`✗ 错误: ${data}`);
+                            status.textContent = '测试失败！';
+                            break;
+                    }
+                });
+                
+                worker.addEventListener('error', (error) => {
+                    log(`✗ Worker错误: ${error.message}`);
+                    log(`文件名: ${error.filename}`);
+                    log(`行号: ${error.lineno}`);
+                    status.textContent = 'Worker错误！';
+                });
+                
+            } catch (error) {
+                log(`✗ 创建Worker失败: ${error.message}`);
+                status.textContent = 'Worker创建失败！';
+            }
+        } else {
+            status.textContent = '浏览器不支持Worker！';
+            log('✗ 当前浏览器不支持Web Worker');
+        }
+    </script>
+</body>
+</html>

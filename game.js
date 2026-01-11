@@ -9,8 +9,52 @@ class GameController {
         this.gameTimer = null;
         this.isAIThinking = false;
         this.isPlayerTurn = true;
+        this.aiWorker = null;
         
         this.init();
+        this.initAIWorker();
+    }
+    
+    // 初始化AI Worker
+    initAIWorker() {
+        if (window.Worker) {
+            try {
+                // 创建Worker（需要服务器环境）
+                this.aiWorker = new Worker('ai-worker.js');
+                
+                this.aiWorker.addEventListener('message', (e) => {
+                    const { type, data } = e.data;
+                    
+                    switch (type) {
+                        case 'loaded':
+                            console.log('AI Worker已加载');
+                            break;
+                            
+                        case 'ready':
+                            console.log('AI引擎已就绪');
+                            break;
+                            
+                        case 'result':
+                            this.handleAIResult(data);
+                            break;
+                            
+                        case 'error':
+                            console.error('AI Worker错误:', data);
+                            this.isAIThinking = false;
+                            break;
+                    }
+                });
+                
+                this.aiWorker.addEventListener('error', (error) => {
+                    console.error('AI Worker错误:', error);
+                    this.isAIThinking = false;
+                });
+                
+            } catch (error) {
+                console.warn('无法创建AI Worker:', error);
+                this.aiWorker = null;
+            }
+        }
     }
 
     init() {
@@ -283,40 +327,69 @@ class GameController {
         this.isAIThinking = true;
         this.updateGameStatus('AI思考中...');
         
-        // 使用Web Worker避免阻塞UI
-        setTimeout(() => {
-            const aiColor = this.engine.currentPlayer;
-            const depth = this.engine.aiDepth[this.gameConfig.difficulty] || 4;
-            console.log('depth',depth);
-            const bestMove = this.engine.getBestMove(aiColor, depth);
+        const aiColor = this.engine.currentPlayer;
+        const maxTime = this.getAIMaxThinkTime();
+        
+        // 准备棋盘状态
+        const boardState = this.engine.getGameState();
+        
+        if (this.aiWorker) {
+            // 使用Worker执行AI计算（不阻塞UI）
+            this.aiWorker.postMessage({
+                type: 'search',
+                data: {
+                    boardState: boardState,
+                    color: aiColor,
+                    difficulty: this.gameConfig.difficulty,
+                    maxTime: maxTime
+                }
+            });
+        } else {
+            // 降级方案：在主线程执行（会阻塞UI）
+            setTimeout(() => {
+                const bestMove = this.engine.getBestMoveWithTimeLimit(aiColor, maxTime);
+                this.handleAIResult({ move: bestMove, searchTime: 0 });
+            }, 100);
+        }
+    }
+    
+    // 处理AI计算结果
+    handleAIResult(data) {
+        const { move, searchTime } = data;
+        
+        if (move) {
+            // 执行移动
+            this.engine.makeMove(move.from, move.to);
+            this.updateBoardDisplay();
+            this.updateUI();
             
-            if (bestMove) {
-                // 模拟思考时间
-                const thinkTime = this.getAIThinkTime();
-                setTimeout(() => {
-                    this.engine.makeMove(bestMove.from, bestMove.to);
-                    this.updateBoardDisplay();
-                    this.updateUI();
-                    
-                    // 检查游戏是否结束
-                    if (this.engine.gameState !== 'playing' && this.engine.gameState !== 'check') {
-                        this.endGame();
-                        return;
-                    }
-                    
-                    this.switchTurn();
-                    this.isAIThinking = false;
-                    
-                    // 如果是AI对AI模式，继续下一轮
-                    if (this.gameConfig.mode === 'ai-ai') {
-                        setTimeout(() => this.makeAIMove(), this.getAIThinkTime());
-                    }
-                }, thinkTime);
-            } else {
-                this.isAIThinking = false;
+            // 检查游戏是否结束
+            if (this.engine.gameState !== 'playing' && this.engine.gameState !== 'check') {
                 this.endGame();
+                return;
             }
-        }, 100);
+            
+            this.switchTurn();
+            this.isAIThinking = false;
+            
+            // 如果是AI对AI模式，继续下一轮
+            if (this.gameConfig.mode === 'ai-ai') {
+                setTimeout(() => this.makeAIMove(), 500);
+            }
+        } else {
+            this.isAIThinking = false;
+            this.endGame();
+        }
+    }
+    
+    // 获取AI最大思考时间（毫秒）
+    getAIMaxThinkTime() {
+        const timeMap = {
+            easy: 2000,   // 简单：最多2秒
+            medium: 5000, // 中等：最多5秒
+            hard: 10000   // 困难：最多10秒
+        };
+        return timeMap[this.gameConfig.difficulty] || 3000;
     }
 
     // 获取AI思考时间
